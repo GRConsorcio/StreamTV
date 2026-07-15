@@ -190,11 +190,15 @@ let autoplay = true;
 // arquivo seja publicado/exposto, quem pegar o token só consegue
 // mexer nesse repositório — não em outros projetos seus.
 // ══════════════════════════════════════════════════════════════════
-const GH_USER  = 'rafaelsilvamessias9';
+const GH_USER  = 'GRConsorcio';
 const GH_REPO  = 'StreamTV';
-const GH_TOKEN = 'COLE_SEU_TOKEN_AQUI'; // github_pat_xxxxxxxxxxxxxxxxxxxx
+const GH_TOKEN = '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'; // github_pat_xxxxxxxxxxxxxxxxxxxx
 
-if (GH_TOKEN === 'COLE_SEU_TOKEN_AQUI') {
+// Checagem por FORMATO, não por texto igual — assim um "substituir tudo" no
+// editor (que troca o placeholder nos dois lugares ao mesmo tempo) não quebra
+// esse aviso. Um token de verdade é bem mais longo que o placeholder e nunca
+// começa com "COLE_".
+if (!GH_TOKEN || GH_TOKEN.length < 20 || GH_TOKEN.startsWith('COLE_')) {
     window.addEventListener('DOMContentLoaded', () => {
         const el = document.createElement('div');
         el.textContent = '⚠️ Token não configurado — edite a constante GH_TOKEN no código deste arquivo.';
