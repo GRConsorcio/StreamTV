@@ -472,6 +472,27 @@ function disposeCurrentVideo() {
     } catch (e) {}
 }
 
+// "Toque pra iniciar": única forma real de liberar áudio automático depois
+// que o navegador bloqueia por falta de interação. Um toque AQUI conta como
+// gesto do usuário — dá play() só nesse vídeo, e libera autoplay com som
+// pro resto da sessão (não precisa tocar de novo nos próximos vídeos).
+function showUnlockOverlay() {
+    if (document.getElementById('unlockOverlay')) return; // já está mostrando
+    const overlay = document.createElement('div');
+    overlay.id = 'unlockOverlay';
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:50;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;cursor:pointer;color:#fff;text-align:center;font-family:inherit;';
+    overlay.innerHTML = '<div style="font-size:52px;">🔊</div><div style="font-size:20px;font-weight:600;">Toque para iniciar a exibição</div>';
+    overlay.addEventListener('click', () => {
+        overlay.remove();
+        const vid = document.getElementById('mainVideo');
+        if (vid) {
+            armStallWatchdog(vid); // watchdog anterior foi desarmado ao mostrar essa tela
+            vid.play().catch(e => console.warn('[StreamTV] ainda falhou após o toque:', e.message));
+        }
+    }, { once: true });
+    document.getElementById('displayArea').appendChild(overlay);
+}
+
 // Detecta vídeo travado (não avança mais, ficou "preso") e pula pro próximo
 // automaticamente em vez de ficar parado pra sempre — cobre buffering que não
 // se recupera, erro de decodificação, URL que parou de responder, etc.
@@ -553,7 +574,19 @@ function _renderDisplayContent() {
             const playPromise = vid.play();
             if (playPromise && typeof playPromise.catch === 'function') {
                 playPromise.catch(err => {
-                    console.warn('[StreamTV] reprodução bloqueada/falhou, pulando:', err.message);
+                    if (err.name === 'NotAllowedError') {
+                        // Bloqueio de política de autoplay (não um vídeo com problema) —
+                        // acontece com QUALQUER vídeo até alguém tocar na tela uma vez.
+                        // Pular pro próximo cai no mesmo bloqueio e vira loop infinito
+                        // (foi o que travou/crashou antes) — em vez disso, espera o toque.
+                        // Desarma o watchdog: sem isso ele "descobre" o mesmo travamento
+                        // sozinho 5s depois e tenta pular, disputando com o toque.
+                        clearTimeout(window._stallTimer);
+                        console.warn('[StreamTV] autoplay bloqueado pelo navegador — aguardando toque na tela');
+                        showUnlockOverlay();
+                        return;
+                    }
+                    console.warn('[StreamTV] reprodução falhou, pulando:', err.message);
                     if (loopMode === 'playlist') navigate(1);
                 });
             }
