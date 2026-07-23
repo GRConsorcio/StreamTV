@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StreamTV - Upload Direto</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📺</text></svg>">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #ffffff; }
@@ -31,13 +32,6 @@
         .btn-secondary:hover { background: #475569; }
         .btn-danger { background: #ef4444; color: white; padding: 4px 10px; font-size: 11px; width: auto; }
         .btn-danger:hover { background: #dc2626; }
-
-        .config-box { background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.2); border-radius: 8px; padding: 10px; margin-bottom: 10px; flex-shrink: 0; }
-        .config-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #60a5fa; margin-bottom: 8px; }
-        .config-hint { font-size: 10px; color: #64748b; margin-top: 6px; line-height: 1.4; }
-        .config-hint a { color: #60a5fa; text-decoration: none; }
-        .config-saved { font-size: 11px; color: #4ade80; margin-top: 4px; display: none; }
-        .config-saved.show { display: block; }
 
         .progress-container { margin-bottom: 6px; display: none; }
         .progress-container.active { display: block; }
@@ -93,25 +87,6 @@
         <div class="panel-scrollable">
         <div class="panel-header"><h1>📺 StreamTV</h1></div>
 
-        <!-- CONFIGURAÇÃO GITHUB -->
-        <div class="config-box">
-            <div class="config-title">⚙️ GitHub como Storage</div>
-            <div class="form-group">
-                <label>Usuário GitHub</label>
-                <input type="text" id="ghUser" placeholder="ex: meuusuario">
-            </div>
-            <div class="form-group">
-                <label>Repositório</label>
-                <input type="text" id="ghRepo" placeholder="ex: streamtv-midia">
-            </div>
-            <div class="form-group">
-                <label>Personal Access Token</label>
-                <input type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
-            </div>
-            <button class="btn-secondary" onclick="saveConfig()" style="width:100%;margin-top:4px;">💾 Salvar</button>
-            <div class="config-saved" id="configSaved">✅ Salvo!</div>
-        </div>
-
         <div class="status-msg" id="statusMsg"></div>
 
         <!-- UPLOAD -->
@@ -156,7 +131,7 @@
             </div>
             <!-- CONTROLES GERAIS -->
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;">
-                <button class="btn-secondary" onclick="loadFromGitHub()" style="font-size:10px;padding:6px 4px;">🔄 Sync</button>
+                <button class="btn-secondary" onclick="loadFromSupabase()" style="font-size:10px;padding:6px 4px;">🔄 Sync</button>
                 <button class="btn-secondary" onclick="clearLocal()" style="font-size:10px;padding:6px 4px;">🗑️ Limpar</button>
                 <button class="btn-secondary" onclick="toggleFullscreen()" style="font-size:10px;padding:6px 4px;">🖥️ Full</button>
             </div>
@@ -183,14 +158,23 @@
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // =====================================================
-//  STREAMTV — GitHub como storage
-//  Arquivos ficam salvos permanentemente no repositório
-//  Sem Firebase, sem custo extra
+//  STREAMTV — Supabase Storage
+//  Bucket público "streamtv" — sem login, sem token, sem
+//  limite baixo de tamanho (troca do GitHub Contents API,
+//  que rejeitava vídeo com erro 422 "arquivo muito grande").
+//  A anon key abaixo é pública por design: protegida pelas
+//  policies do bucket, não por estar escondida.
 // =====================================================
+const SUPA_URL = 'https://prquggwhjcvenzuziaox.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBycXVnZ3doamN2ZW56dXppYW94Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMTUzMDUsImV4cCI6MjA5Mzc5MTMwNX0.vjbVhGIUowS6AGE1Uf5uDutCMI193mhgra3GSwlqMec';
+const { createClient } = supabase;
+const sb = createClient(SUPA_URL, SUPA_KEY);
+const BUCKET = 'streamtv';
 
-const FOLDER = 'midia'; // pasta no repositório
+const FOLDER = 'midia'; // pasta dentro do bucket
 let queue = [];
 let currentIndex = 0;
 let isUploading = false;
@@ -211,38 +195,6 @@ function toggleAutoplay() {
     const btn = document.getElementById('btnAutoplay');
     document.getElementById('autoplayLabel').textContent = autoplay ? 'Auto: ON' : 'Auto: OFF';
     btn.className = autoplay ? 'btn-loop-active' : 'btn-loop-active off';
-}
-
-// ── CONFIG — salva apenas no dispositivo (IndexedDB + localStorage) ──
-async function saveConfig() {
-    const cfg = { user: v('ghUser'), repo: v('ghRepo'), token: v('ghToken') };
-    if (!cfg.user || !cfg.repo || !cfg.token) {
-        showStatus('⚠️ Preencha usuário, repositório e token', 'warn'); return;
-    }
-    const data = JSON.stringify(cfg);
-    await idbSet('stv_config', data);
-    try { localStorage.setItem('stv_config', data); } catch(e) {}
-    document.getElementById('configSaved').classList.add('show');
-    setTimeout(() => document.getElementById('configSaved').classList.remove('show'), 3000);
-    loadFromGitHub();
-}
-
-function getConfig() {
-    return { user: v('ghUser'), repo: v('ghRepo'), token: v('ghToken') };
-}
-
-async function loadConfig() {
-    let raw = null;
-    try { raw = await idbGet('stv_config'); } catch(e) {}
-    if (!raw) { try { raw = localStorage.getItem('stv_config'); } catch(e) {} }
-    if (raw) {
-        try {
-            const cfg = JSON.parse(raw);
-            set('ghUser',  cfg.user  || '');
-            set('ghRepo',  cfg.repo  || '');
-            set('ghToken', cfg.token || '');
-        } catch(e) {}
-    }
 }
 
 // ── HELPERS ──
@@ -270,16 +222,12 @@ function updateProgress(pct) {
     document.getElementById('progressText').textContent = `Enviando... ${Math.round(pct)}%`;
 }
 
-// ── UPLOAD PARA GITHUB ──
+// ── UPLOAD PARA O SUPABASE STORAGE ──
 async function uploadMedia() {
     const name = v('mediaName');
     const file = document.getElementById('mediaFile').files[0];
-    const cfg  = getConfig();
 
     if (!name || !file) { alert('Preencha o nome e selecione um arquivo'); return; }
-    if (!cfg.user || !cfg.repo || !cfg.token) {
-        alert('Configure o GitHub primeiro!'); return;
-    }
     if (isUploading) return;
 
     isUploading = true;
@@ -288,66 +236,45 @@ async function uploadMedia() {
     updateProgress(10);
 
     try {
-        // Lê como base64
-        const b64full = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload = e => res(e.target.result);
-            r.onerror = () => rej(new Error('Erro ao ler arquivo'));
-            r.readAsDataURL(file);
+        const ext    = file.name.split('.').pop().toLowerCase();
+        const safe   = name.replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const stPath = `${FOLDER}/${Date.now()}_${safe}.${ext}`;
+
+        updateProgress(30);
+        const { error: upErr } = await sb.storage.from(BUCKET).upload(stPath, file, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: file.type || undefined
         });
-        updateProgress(40);
-
-        const ext      = file.name.split('.').pop().toLowerCase();
-        const safe     = name.replace(/[^a-zA-Z0-9_\-]/g, '_');
-        const ghName   = `${FOLDER}/${Date.now()}_${safe}.${ext}`;
-        const b64clean = b64full.split(',')[1]; // remove "data:...;base64,"
-
-        updateProgress(60);
-
-        const res = await fetch(
-            `https://api.github.com/repos/${cfg.user}/${cfg.repo}/contents/${ghName}`,
-            {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${cfg.token}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/vnd.github+json',
-                    'X-GitHub-Api-Version': '2022-11-28'
-                },
-                body: JSON.stringify({ message: `Upload: ${name}`, content: b64clean })
-            }
-        );
-
+        if (upErr) throw new Error(upErr.message);
         updateProgress(90);
-        if (!res.ok) { const e = await res.json(); throw new Error(e.message || `HTTP ${res.status}`); }
-        const data = await res.json();
-        updateProgress(100);
 
+        const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(stPath);
         const type = ['mp4','webm','mov','avi','mkv'].includes(ext) ? 'video'
                    : ext === 'pdf' ? 'document' : 'image';
 
         queue.push({
-            id: data.content.sha,
+            id: stPath,
             name,
             type,
-            url: data.content.download_url,
-            ghPath: ghName,
-            ghSha: data.content.sha,
+            url: pub.publicUrl,
+            stPath,
             fileName: file.name,
             fileSize: file.size
         });
+        updateProgress(100);
 
         saveLocal();
         renderQueue();
         updateDisplay();
-        showStatus(`✅ "${name}" salvo no GitHub!`, 'ok');
+        showStatus(`✅ "${name}" salvo!`, 'ok');
         set('mediaName', '');
         document.getElementById('mediaFile').value = '';
         document.getElementById('fileName').textContent = 'Nenhum arquivo selecionado';
 
     } catch (err) {
         showStatus(`❌ ${err.message}`, 'err');
-        alert('Erro: ' + err.message + '\n\nVerifique:\n• Token com permissão Contents (read & write)\n• Usuário e repositório corretos');
+        alert('Erro ao enviar: ' + err.message);
     } finally {
         isUploading = false;
         document.getElementById('uploadBtn').disabled = false;
@@ -358,31 +285,23 @@ async function uploadMedia() {
     }
 }
 
-// ── CARREGAR DO GITHUB ──
-async function loadFromGitHub() {
-    const cfg = getConfig();
-    if (!cfg.user || !cfg.repo || !cfg.token) { await loadLocal(); return; }
-
-    showStatus('🔄 Carregando do GitHub...', 'warn');
+// ── CARREGAR DO SUPABASE STORAGE ──
+async function loadFromSupabase() {
+    showStatus('🔄 Carregando...', 'warn');
     try {
-        const res = await fetch(
-            `https://api.github.com/repos/${cfg.user}/${cfg.repo}/contents/${FOLDER}`,
-            { headers: { 'Authorization': `Bearer ${cfg.token}`, 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } }
-        );
+        const { data: files, error } = await sb.storage.from(BUCKET).list(FOLDER, {
+            sortBy: { column: 'created_at', order: 'asc' }
+        });
+        if (error) throw new Error(error.message);
 
-        if (res.status === 404) {
-            showStatus('📂 Pasta "midia" ainda não existe. Faça o primeiro upload!', 'warn');
-            queue = []; renderQueue(); updateDisplay(); return;
-        }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const files = await res.json();
-        queue = files.filter(f => f.type === 'file').map(f => {
+        queue = (files || []).filter(f => f.name && f.id).map(f => {
+            const stPath = `${FOLDER}/${f.name}`;
             const ext  = f.name.split('.').pop().toLowerCase();
             const type = ['mp4','webm','mov','avi','mkv'].includes(ext) ? 'video'
                        : ext === 'pdf' ? 'document' : 'image';
             const name = f.name.replace(/^\d+_/, '').replace(/\.[^.]+$/, '').replace(/_/g, ' ');
-            return { id: f.sha, name, type, url: f.download_url, ghPath: f.path, ghSha: f.sha, fileName: f.name, fileSize: f.size };
+            const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(stPath);
+            return { id: stPath, name, type, url: pub.publicUrl, stPath, fileName: f.name, fileSize: f.metadata?.size };
         });
 
         saveLocal();
@@ -395,21 +314,13 @@ async function loadFromGitHub() {
     }
 }
 
-// ── DELETAR DO GITHUB ──
+// ── DELETAR DO SUPABASE STORAGE ──
 async function deleteMedia(index) {
     const item = queue[index];
-    if (!confirm(`Deletar "${item.name}" do GitHub?`)) return;
-    const cfg = getConfig();
+    if (!confirm(`Deletar "${item.name}"?`)) return;
     try {
-        const res = await fetch(
-            `https://api.github.com/repos/${cfg.user}/${cfg.repo}/contents/${item.ghPath}`,
-            {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${cfg.token}`, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-                body: JSON.stringify({ message: `Remover: ${item.name}`, sha: item.ghSha })
-            }
-        );
-        if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+        const { error } = await sb.storage.from(BUCKET).remove([item.stPath]);
+        if (error) throw new Error(error.message);
         queue.splice(index, 1);
         if (currentIndex >= queue.length) currentIndex = Math.max(0, queue.length - 1);
         saveLocal(); renderQueue(); updateDisplay();
@@ -592,10 +503,7 @@ function toggleFullscreen() {
 
 // ── INIT ──
 setLoopMode('playlist'); // default: loop playlist
-(async () => {
-    await loadConfig();
-    loadFromGitHub();
-})();
+loadFromSupabase();
 </script>
 </body>
 </html>
