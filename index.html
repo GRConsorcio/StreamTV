@@ -480,21 +480,21 @@ function armStallWatchdog(vid) {
     let lastProgress = Date.now();
     const check = () => {
         if (vid !== document.getElementById('mainVideo')) return; // já trocou de mídia
-        const stalled = !vid.paused && !vid.ended && (Date.now() - lastProgress > 8000);
+        const stalled = !vid.paused && !vid.ended && (Date.now() - lastProgress > 5000);
         if (stalled) {
             console.warn('[StreamTV] vídeo travado, pulando para o próximo');
             if (loopMode === 'playlist') navigate(1);
             else updateDisplay(); // 'single'/'off' — tenta recarregar a mesma mídia
             return;
         }
-        window._stallTimer = setTimeout(check, 2000);
+        window._stallTimer = setTimeout(check, 1500);
     };
     vid.addEventListener('timeupdate', () => { lastProgress = Date.now(); });
     vid.addEventListener('error', () => {
         console.warn('[StreamTV] erro no vídeo, pulando para o próximo');
         if (loopMode === 'playlist') navigate(1);
     });
-    window._stallTimer = setTimeout(check, 2000);
+    window._stallTimer = setTimeout(check, 1500);
 }
 
 function _renderDisplayContent() {
@@ -534,7 +534,13 @@ function _renderDisplayContent() {
         }
     } else if (item.type === 'video') {
         const loopAttr = loopMode === 'single' ? 'loop' : '';
-        c.innerHTML = `<video id="mainVideo" autoplay preload="auto" playsinline ${loopAttr} style="max-width:100%;max-height:100%;"><source src="${item.url}">Vídeo não suportado</video>`;
+        // Sem o atributo autoplay de propósito: se o navegador bloquear a
+        // reprodução automática (política de autoplay), o atributo falha em
+        // silêncio — o vídeo fica parado na primeira imagem pra sempre, sem
+        // nenhum evento disparando, e só o watchdog de travamento (8s+) ia
+        // perceber. Chamando .play() manualmente abaixo, a Promise rejeitada
+        // avisa NA HORA, e já pula pro próximo em vez de ficar preso.
+        c.innerHTML = `<video id="mainVideo" preload="auto" playsinline ${loopAttr} style="max-width:100%;max-height:100%;"><source src="${item.url}">Vídeo não suportado</video>`;
         const vid = document.getElementById('mainVideo');
         if (vid && loopMode !== 'single' && autoplay) {
             vid.addEventListener('ended', () => {
@@ -542,7 +548,16 @@ function _renderDisplayContent() {
                 // loopMode 'off' = just stops
             });
         }
-        if (vid) armStallWatchdog(vid);
+        if (vid) {
+            armStallWatchdog(vid);
+            const playPromise = vid.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch(err => {
+                    console.warn('[StreamTV] reprodução bloqueada/falhou, pulando:', err.message);
+                    if (loopMode === 'playlist') navigate(1);
+                });
+            }
+        }
     } else {
         c.innerHTML = `<iframe src="${item.url}"></iframe>`;
     }
