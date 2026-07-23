@@ -448,11 +448,53 @@ function updateDisplay() {
     const c = document.getElementById('displayContent');
     const hadContent = c.childElementCount > 0;
     if (!hadContent) { _renderDisplayContent(); return; }
+    disposeCurrentVideo();
     c.style.opacity = '0';
     setTimeout(() => {
         _renderDisplayContent();
         c.style.opacity = '1';
     }, 400);
+}
+
+// Libera o <video> anterior explicitamente (pausa + solta o buffer) antes de
+// trocar de mídia, em vez de só confiar no innerHTML/garbage collector — numa
+// tela que fica rodando em loop por horas (Fire TV, pouca RAM), isso evita
+// acúmulo de buffers de vídeo não liberados que iam deixando a exibição mais
+// pesada e propensa a travar com o tempo.
+function disposeCurrentVideo() {
+    clearTimeout(window._stallTimer);
+    const old = document.getElementById('mainVideo');
+    if (!old) return;
+    try {
+        old.pause();
+        old.removeAttribute('src');
+        old.load();
+    } catch (e) {}
+}
+
+// Detecta vídeo travado (não avança mais, ficou "preso") e pula pro próximo
+// automaticamente em vez de ficar parado pra sempre — cobre buffering que não
+// se recupera, erro de decodificação, URL que parou de responder, etc.
+// Reseta o cronômetro a cada 'timeupdate' real (prova de que está tocando).
+function armStallWatchdog(vid) {
+    let lastProgress = Date.now();
+    const check = () => {
+        if (vid !== document.getElementById('mainVideo')) return; // já trocou de mídia
+        const stalled = !vid.paused && !vid.ended && (Date.now() - lastProgress > 8000);
+        if (stalled) {
+            console.warn('[StreamTV] vídeo travado, pulando para o próximo');
+            if (loopMode === 'playlist') navigate(1);
+            else updateDisplay(); // 'single'/'off' — tenta recarregar a mesma mídia
+            return;
+        }
+        window._stallTimer = setTimeout(check, 2000);
+    };
+    vid.addEventListener('timeupdate', () => { lastProgress = Date.now(); });
+    vid.addEventListener('error', () => {
+        console.warn('[StreamTV] erro no vídeo, pulando para o próximo');
+        if (loopMode === 'playlist') navigate(1);
+    });
+    window._stallTimer = setTimeout(check, 2000);
 }
 
 function _renderDisplayContent() {
@@ -492,7 +534,7 @@ function _renderDisplayContent() {
         }
     } else if (item.type === 'video') {
         const loopAttr = loopMode === 'single' ? 'loop' : '';
-        c.innerHTML = `<video id="mainVideo" autoplay ${loopAttr} style="max-width:100%;max-height:100%;"><source src="${item.url}">Vídeo não suportado</video>`;
+        c.innerHTML = `<video id="mainVideo" autoplay preload="auto" playsinline ${loopAttr} style="max-width:100%;max-height:100%;"><source src="${item.url}">Vídeo não suportado</video>`;
         const vid = document.getElementById('mainVideo');
         if (vid && loopMode !== 'single' && autoplay) {
             vid.addEventListener('ended', () => {
@@ -500,6 +542,7 @@ function _renderDisplayContent() {
                 // loopMode 'off' = just stops
             });
         }
+        if (vid) armStallWatchdog(vid);
     } else {
         c.innerHTML = `<iframe src="${item.url}"></iframe>`;
     }
