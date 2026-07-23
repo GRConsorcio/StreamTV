@@ -93,6 +93,25 @@
         <div class="panel-scrollable">
         <div class="panel-header"><h1>📺 StreamTV</h1></div>
 
+        <!-- CONFIGURAÇÃO GITHUB -->
+        <div class="config-box">
+            <div class="config-title">⚙️ GitHub como Storage</div>
+            <div class="form-group">
+                <label>Usuário GitHub</label>
+                <input type="text" id="ghUser" placeholder="ex: meuusuario">
+            </div>
+            <div class="form-group">
+                <label>Repositório</label>
+                <input type="text" id="ghRepo" placeholder="ex: streamtv-midia">
+            </div>
+            <div class="form-group">
+                <label>Personal Access Token</label>
+                <input type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+            </div>
+            <button class="btn-secondary" onclick="saveConfig()" style="width:100%;margin-top:4px;">💾 Salvar</button>
+            <div class="config-saved" id="configSaved">✅ Salvo!</div>
+        </div>
+
         <div class="status-msg" id="statusMsg"></div>
 
         <!-- UPLOAD -->
@@ -178,35 +197,6 @@ let isUploading = false;
 let loopMode = 'playlist'; // 'playlist' | 'single' | 'off'
 let autoplay = true;
 
-// ══════════════════════════════════════════════════════════════════
-// CONFIGURAÇÃO FIXA DO GITHUB — edite só aqui, uma vez.
-// A caixa "GitHub como Storage" foi removida da tela; esses três
-// valores fazem o mesmo papel que os campos faziam antes.
-//
-// ⚠️ Use um token FINE-GRAINED restrito só ao repositório StreamTV
-// (Settings → Developer settings → Personal access tokens →
-// Fine-grained tokens → Repository access: only StreamTV →
-// Permissions → Contents: Read and write). Assim, mesmo que esse
-// arquivo seja publicado/exposto, quem pegar o token só consegue
-// mexer nesse repositório — não em outros projetos seus.
-// ══════════════════════════════════════════════════════════════════
-const GH_USER  = 'GRConsorcio';
-const GH_REPO  = 'StreamTV';
-const GH_TOKEN = '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'; // github_pat_xxxxxxxxxxxxxxxxxxxx
-
-// Checagem por FORMATO, não por texto igual — assim um "substituir tudo" no
-// editor (que troca o placeholder nos dois lugares ao mesmo tempo) não quebra
-// esse aviso. Um token de verdade é bem mais longo que o placeholder e nunca
-// começa com "COLE_".
-if (!GH_TOKEN || GH_TOKEN.length < 20 || GH_TOKEN.startsWith('COLE_')) {
-    window.addEventListener('DOMContentLoaded', () => {
-        const el = document.createElement('div');
-        el.textContent = '⚠️ Token não configurado — edite a constante GH_TOKEN no código deste arquivo.';
-        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#7f1d1d;color:#fff;padding:10px;text-align:center;font-size:13px;font-weight:700;';
-        document.body.prepend(el);
-    });
-}
-
 function setLoopMode(mode) {
     loopMode = mode;
     document.getElementById('btnLoopPlaylist').classList.toggle('active', mode === 'playlist');
@@ -224,11 +214,35 @@ function toggleAutoplay() {
 }
 
 // ── CONFIG — salva apenas no dispositivo (IndexedDB + localStorage) ──
-// Config agora é fixa (constantes GH_USER/GH_REPO/GH_TOKEN lá em cima).
-// Mantido como função só pra não precisar mudar todo o resto do código
-// que já chama getConfig() em vários lugares.
+async function saveConfig() {
+    const cfg = { user: v('ghUser'), repo: v('ghRepo'), token: v('ghToken') };
+    if (!cfg.user || !cfg.repo || !cfg.token) {
+        showStatus('⚠️ Preencha usuário, repositório e token', 'warn'); return;
+    }
+    const data = JSON.stringify(cfg);
+    await idbSet('stv_config', data);
+    try { localStorage.setItem('stv_config', data); } catch(e) {}
+    document.getElementById('configSaved').classList.add('show');
+    setTimeout(() => document.getElementById('configSaved').classList.remove('show'), 3000);
+    loadFromGitHub();
+}
+
 function getConfig() {
-    return { user: GH_USER, repo: GH_REPO, token: GH_TOKEN };
+    return { user: v('ghUser'), repo: v('ghRepo'), token: v('ghToken') };
+}
+
+async function loadConfig() {
+    let raw = null;
+    try { raw = await idbGet('stv_config'); } catch(e) {}
+    if (!raw) { try { raw = localStorage.getItem('stv_config'); } catch(e) {} }
+    if (raw) {
+        try {
+            const cfg = JSON.parse(raw);
+            set('ghUser',  cfg.user  || '');
+            set('ghRepo',  cfg.repo  || '');
+            set('ghToken', cfg.token || '');
+        } catch(e) {}
+    }
 }
 
 // ── HELPERS ──
@@ -578,7 +592,10 @@ function toggleFullscreen() {
 
 // ── INIT ──
 setLoopMode('playlist'); // default: loop playlist
-loadFromGitHub();
+(async () => {
+    await loadConfig();
+    loadFromGitHub();
+})();
 </script>
 </body>
 </html>
