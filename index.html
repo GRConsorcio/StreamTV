@@ -561,7 +561,12 @@ function _renderDisplayContent() {
         // nenhum evento disparando, e só o watchdog de travamento (8s+) ia
         // perceber. Chamando .play() manualmente abaixo, a Promise rejeitada
         // avisa NA HORA, e já pula pro próximo em vez de ficar preso.
-        c.innerHTML = `<video id="mainVideo" preload="auto" playsinline ${loopAttr} style="max-width:100%;max-height:100%;"><source src="${item.url}">Vídeo não suportado</video>`;
+        // preload="metadata" (não "auto"): em Fire TV/Smart TV com RAM curta, "auto"
+        // faz o navegador tentar baixar/bufferizar o arquivo inteiro de uma vez, o
+        // que estoura memória e derruba o processo em vídeos grandes (100+MB) — o
+        // app "abre, não carrega e fecha". Com "metadata" ele carrega só o
+        // necessário pra tocar e vai bufferizando aos poucos via range request.
+        c.innerHTML = `<video id="mainVideo" preload="metadata" playsinline ${loopAttr} style="max-width:100%;max-height:100%;"><source src="${item.url}">Vídeo não suportado</video>`;
         const vid = document.getElementById('mainVideo');
         if (vid && loopMode !== 'single' && autoplay) {
             vid.addEventListener('ended', () => {
