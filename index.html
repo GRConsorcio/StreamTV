@@ -80,6 +80,10 @@
         .loop-badge.playlist { background: rgba(59,130,246,0.2); color: #60a5fa; }
         .loop-badge.single { background: rgba(139,92,246,0.2); color: #a78bfa; }
 
+        /* Aviso de sem-internet — some direto sobre o player quando a rede cai,
+           pra não deixar a tela só piscando/preta sem explicação nenhuma. */
+        .offline-banner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 20; background: rgba(239,68,68,0.94); color: #fff; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 700; display: none; align-items: center; gap: 6px; }
+
     </style>
 </head>
 <body>
@@ -100,7 +104,7 @@
             </div>
             <div class="form-group">
                 <label>Arquivo</label>
-                <input type="file" id="mediaFile" accept="image/*,video/*,.pdf" onchange="updateFileName()">
+                <input type="file" id="mediaFile" accept="image/*,video/*,.pdf,.m3u8,.m3u" onchange="updateFileName()">
                 <div class="file-name" id="fileName">Nenhum arquivo selecionado</div>
             </div>
             <div class="progress-container" id="progressContainer">
@@ -108,6 +112,28 @@
                 <div class="progress-text" id="progressText">Enviando... 0%</div>
             </div>
             <button class="btn-primary" id="uploadBtn" onclick="uploadMedia()">⬆️ Fazer Upload</button>
+        </div>
+
+        <!-- STREAM / IPTV POR URL -->
+        <div class="section">
+            <span class="section-title">Adicionar Stream (URL / IPTV)</span>
+            <div class="form-group">
+                <label>Nome/Título</label>
+                <input type="text" id="streamName" placeholder="Ex: Canal 24h">
+            </div>
+            <div class="form-group">
+                <label>URL do stream</label>
+                <input type="text" id="streamUrl" placeholder="https://.../lista.m3u8">
+            </div>
+            <div class="form-group">
+                <label>Tipo</label>
+                <select id="streamType">
+                    <option value="hls">📡 Stream IPTV (HLS/M3U8)</option>
+                    <option value="video">🎬 Vídeo direto (MP4/WebM)</option>
+                    <option value="image">🖼️ Imagem</option>
+                </select>
+            </div>
+            <button class="btn-secondary" onclick="addStreamUrl()">➕ Adicionar à Fila</button>
         </div>
 
         <!-- FILA -->
@@ -142,6 +168,7 @@
 
     <!-- DISPLAY -->
     <div class="display-area" id="displayArea">
+        <div class="offline-banner" id="offlineBanner">🔌 Sem conexão com a internet</div>
         <div class="display-hud">
             <div class="hud-info">
                 <strong id="hudTitle">StreamTV</strong>
@@ -161,6 +188,10 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- hls.js: dá suporte a stream IPTV (.m3u8/HLS) via MSE em qualquer navegador
+     Chromium-based (Fire TV Silk, Android TV, Tizen, WebOS) — nenhum deles toca
+     HLS nativamente pela tag <video> como o Safari toca. -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
 // =====================================================
 //  STREAMTV — Supabase Storage
@@ -224,6 +255,28 @@ function updateProgress(pct) {
     document.getElementById('progressText').textContent = `Enviando... ${Math.round(pct)}%`;
 }
 
+// ── DETECÇÃO DE TIPO DE MÍDIA ──
+// Antes só olhava a extensão e, sem extensão nenhuma no nome do arquivo, caía
+// direto em "imagem" mesmo pra vídeo/stream — usa o mimetype do arquivo como
+// segunda tentativa antes de desistir e assumir imagem.
+const VIDEO_EXT = ['mp4','webm','mov','avi','mkv'];
+const HLS_EXT   = ['m3u8','m3u'];
+function detectType(filename, mimeType) {
+    const dot = filename.lastIndexOf('.');
+    const ext = dot > -1 ? filename.slice(dot + 1).toLowerCase() : '';
+    if (HLS_EXT.includes(ext)) return 'hls';
+    if (VIDEO_EXT.includes(ext)) return 'video';
+    if (ext === 'pdf') return 'document';
+    if (ext) return 'image';
+    if (mimeType) {
+        if (mimeType.includes('mpegurl')) return 'hls';
+        if (mimeType.startsWith('video/')) return 'video';
+        if (mimeType === 'application/pdf') return 'document';
+        if (mimeType.startsWith('image/')) return 'image';
+    }
+    return 'image';
+}
+
 // ── UPLOAD PARA O SUPABASE STORAGE ──
 async function uploadMedia() {
     const name = v('mediaName');
@@ -232,13 +285,22 @@ async function uploadMedia() {
     if (!name || !file) { alert('Preencha o nome e selecione um arquivo'); return; }
     if (isUploading) return;
 
+    // Aviso pra arquivo grande — numa wifi de TV o upload pode travar minutos
+    // sem nenhum aviso prévio de que vai demorar.
+    const MAX_WARN_MB = 500;
+    if (file.size / 1024 / 1024 > MAX_WARN_MB) {
+        const mb = (file.size / 1024 / 1024).toFixed(0);
+        if (!confirm(`Esse arquivo tem ${mb} MB — o upload pode demorar bastante numa rede de TV. Continuar mesmo assim?`)) return;
+    }
+
     isUploading = true;
     document.getElementById('uploadBtn').disabled = true;
     document.getElementById('progressContainer').classList.add('active');
     updateProgress(10);
 
     try {
-        const ext    = file.name.split('.').pop().toLowerCase();
+        const hasDot = file.name.lastIndexOf('.') > -1;
+        const ext    = hasDot ? file.name.split('.').pop().toLowerCase() : 'bin';
         const safe   = name.replace(/[^a-zA-Z0-9_\-]/g, '_');
         const stPath = `${FOLDER}/${Date.now()}_${safe}.${ext}`;
 
@@ -252,8 +314,7 @@ async function uploadMedia() {
         updateProgress(90);
 
         const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(stPath);
-        const type = ['mp4','webm','mov','avi','mkv'].includes(ext) ? 'video'
-                   : ext === 'pdf' ? 'document' : 'image';
+        const type = detectType(file.name, file.type);
 
         queue.push({
             id: stPath,
@@ -261,6 +322,7 @@ async function uploadMedia() {
             type,
             url: pub.publicUrl,
             stPath,
+            source: 'storage',
             fileName: file.name,
             fileSize: file.size
         });
@@ -287,32 +349,78 @@ async function uploadMedia() {
     }
 }
 
+// ── ADICIONAR STREAM/IPTV POR URL (sem passar pelo Storage) ──
+function addStreamUrl() {
+    const name = v('streamName');
+    const url  = v('streamUrl');
+    const type = document.getElementById('streamType').value;
+    if (!name || !url) { alert('Preencha o nome e a URL do stream'); return; }
+
+    queue.push({
+        id: 'url_' + Date.now(),
+        name,
+        type,
+        url,
+        stPath: null,     // não existe no Storage — não tenta apagar de lá
+        source: 'url',
+        fileName: url,
+        fileSize: null
+    });
+    saveLocal();
+    renderQueue();
+    updateDisplay();
+    showStatus(`✅ Stream "${name}" adicionado!`, 'ok');
+    set('streamName', '');
+    set('streamUrl', '');
+}
+
 // ── CARREGAR DO SUPABASE STORAGE ──
-async function loadFromSupabase() {
-    showStatus('🔄 Carregando...', 'warn');
+// Tenta de novo sozinho se falhar (backoff até 60s) — importante numa Fire
+// Stick ligando sem ninguém por perto pra clicar "Sync" manualmente se a rede
+// ainda estiver subindo no boot.
+let _syncRetryDelay = 10000;
+let _syncInFlight = false;
+async function loadFromSupabase(isRetry) {
+    // Evita duas sincronizações rodando ao mesmo tempo (clique duplo no "Sync",
+    // ou o retry automático disparando junto com o evento 'online') — sem essa
+    // trava, dois updateDisplay() concorrentes trocam o <video> no meio um do
+    // outro e o play() de um deles é abortado no meio (AbortError em cascata).
+    if (_syncInFlight) return;
+    _syncInFlight = true;
+    if (!isRetry) showStatus('🔄 Carregando...', 'warn');
     try {
         const { data: files, error } = await sb.storage.from(BUCKET).list(FOLDER, {
             sortBy: { column: 'created_at', order: 'asc' }
         });
         if (error) throw new Error(error.message);
 
-        queue = (files || []).filter(f => f.name && f.id).map(f => {
+        const storageItems = (files || []).filter(f => f.name && f.id).map(f => {
             const stPath = `${FOLDER}/${f.name}`;
-            const ext  = f.name.split('.').pop().toLowerCase();
-            const type = ['mp4','webm','mov','avi','mkv'].includes(ext) ? 'video'
-                       : ext === 'pdf' ? 'document' : 'image';
+            const type = detectType(f.name, f.metadata?.mimetype);
             const name = f.name.replace(/^\d+_/, '').replace(/\.[^.]+$/, '').replace(/_/g, ' ');
             const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(stPath);
-            return { id: stPath, name, type, url: pub.publicUrl, stPath, fileName: f.name, fileSize: f.metadata?.size };
+            return { id: stPath, name, type, url: pub.publicUrl, stPath, source: 'storage', fileName: f.name, fileSize: f.metadata?.size };
         });
+        // Streams adicionados por URL não existem no Storage — o list() não os
+        // vê, então precisam ser preservados manualmente ou o Sync os apaga.
+        const urlItems = queue.filter(it => it.source === 'url' || !it.stPath);
+        queue = [...storageItems, ...urlItems];
 
         saveLocal();
         renderQueue();
         updateDisplay();
-        showStatus(`✅ ${queue.length} arquivo(s) carregado(s)`, 'ok');
+        showStatus(`✅ ${queue.length} item(ns) na fila`, 'ok');
+
+        clearTimeout(window._syncRetryTimer);
+        _syncRetryDelay = 10000;
     } catch (err) {
         showStatus('⚠️ Erro ao carregar — usando cache local', 'warn');
         await loadLocal();
+        clearTimeout(window._syncRetryTimer);
+        window._syncRetryTimer = setTimeout(() => loadFromSupabase(true), _syncRetryDelay);
+        _syncRetryDelay = Math.min(_syncRetryDelay * 2, 60000);
+    } finally {
+        _syncInFlight = false;
     }
 }
 
@@ -321,8 +429,10 @@ async function deleteMedia(index) {
     const item = queue[index];
     if (!confirm(`Deletar "${item.name}"?`)) return;
     try {
-        const { error } = await sb.storage.from(BUCKET).remove([item.stPath]);
-        if (error) throw new Error(error.message);
+        if (item.stPath) {
+            const { error } = await sb.storage.from(BUCKET).remove([item.stPath]);
+            if (error) throw new Error(error.message);
+        }
         queue.splice(index, 1);
         if (currentIndex >= queue.length) currentIndex = Math.max(0, queue.length - 1);
         saveLocal(); renderQueue(); updateDisplay();
@@ -427,7 +537,7 @@ function renderQueue() {
         <div class="queue-item ${i===currentIndex?'active':''}" onclick="selectMedia(${i})">
             <div class="queue-item-info">
                 <div class="queue-item-name">${i+1}. ${item.name}</div>
-                <div class="queue-item-type">${item.type==='image'?'🖼️ Imagem':item.type==='video'?'🎬 Vídeo':'📄 Documento'}${item.fileSize?' • '+(item.fileSize/1024).toFixed(0)+' KB':''}</div>
+                <div class="queue-item-type">${item.type==='image'?'🖼️ Imagem':item.type==='video'?'🎬 Vídeo':item.type==='hls'?'📡 Stream IPTV':'📄 Documento'}${item.fileSize?' • '+(item.fileSize/1024).toFixed(0)+' KB':''}</div>
             </div>
             <button class="btn-danger" onclick="event.stopPropagation();deleteMedia(${i})">🗑️</button>
         </div>
@@ -456,13 +566,17 @@ function updateDisplay() {
     }, 400);
 }
 
-// Libera o <video> anterior explicitamente (pausa + solta o buffer) antes de
-// trocar de mídia, em vez de só confiar no innerHTML/garbage collector — numa
-// tela que fica rodando em loop por horas (Fire TV, pouca RAM), isso evita
-// acúmulo de buffers de vídeo não liberados que iam deixando a exibição mais
-// pesada e propensa a travar com o tempo.
+// Libera o <video>/hls.js anterior explicitamente (pausa + solta o buffer)
+// antes de trocar de mídia, em vez de só confiar no innerHTML/garbage collector
+// — numa tela que fica rodando em loop por horas (Fire TV, pouca RAM), isso
+// evita acúmulo de buffers de vídeo/stream não liberados que iam deixando a
+// exibição mais pesada e propensa a travar com o tempo.
 function disposeCurrentVideo() {
     clearTimeout(window._stallTimer);
+    if (window._hlsInstance) {
+        try { window._hlsInstance.destroy(); } catch(e) {}
+        window._hlsInstance = null;
+    }
     const old = document.getElementById('mainVideo');
     if (!old) return;
     try {
@@ -493,29 +607,67 @@ function showUnlockOverlay() {
     document.getElementById('displayArea').appendChild(overlay);
 }
 
+// Mostra um aviso visível no lugar de tela preta/travada quando uma mídia não
+// consegue ser reproduzida (formato não suportado no dispositivo, stream fora
+// do ar, etc.) — antes disso só o modo "Playlist" pulava automaticamente; nos
+// modos "Único"/"Sem Loop" a tela simplesmente ficava parada sem nenhum aviso.
+function showPlaybackError(name, msg) {
+    const c = document.getElementById('displayContent');
+    c.innerHTML = `<div class="display-placeholder" style="color:#f87171"><h2>⚠️</h2><p>${msg}</p><p style="font-size:13px;color:#94a3b8;margin-top:6px">${name || ''}</p></div>`;
+}
+
+// Trata rejeição da Promise de vid.play() — compartilhado entre vídeo direto e
+// stream HLS. NotAllowedError = bloqueio de autoplay do navegador (não é
+// problema da mídia); qualquer outro erro = mostra aviso e, se fizer sentido,
+// segue pra próxima mídia da fila.
+function handlePlayRejection(err, item) {
+    if (err.name === 'NotAllowedError') {
+        // Desarma o watchdog: sem isso ele "descobre" o mesmo travamento
+        // sozinho alguns segundos depois e tenta pular, disputando com o toque.
+        clearTimeout(window._stallTimer);
+        console.warn('[StreamTV] autoplay bloqueado pelo navegador — aguardando toque na tela');
+        showUnlockOverlay();
+        return;
+    }
+    if (err.name === 'AbortError') {
+        // play() foi interrompido pela própria troca de mídia (innerHTML novo
+        // ou disposeCurrentVideo rodando antes do play() anterior resolver) —
+        // não é uma falha real da mídia, então não mostra erro nem pula.
+        return;
+    }
+    console.warn('[StreamTV] reprodução falhou:', err.message);
+    showPlaybackError(item.name, 'Não foi possível reproduzir esta mídia');
+    if (loopMode === 'playlist' && navigator.onLine) setTimeout(() => navigate(1), 2500);
+}
+
 // Detecta vídeo travado (não avança mais, ficou "preso") e pula pro próximo
 // automaticamente em vez de ficar parado pra sempre — cobre buffering que não
 // se recupera, erro de decodificação, URL que parou de responder, etc.
 // Reseta o cronômetro a cada 'timeupdate' real (prova de que está tocando).
+// Limite de 15s (era 5s): numa wifi de Fire Stick/TV, 5s sem progresso ainda
+// pode ser buffering normal — 5s estava pulando vídeo bom achando que travou.
 function armStallWatchdog(vid) {
     let lastProgress = Date.now();
     const check = () => {
         if (vid !== document.getElementById('mainVideo')) return; // já trocou de mídia
-        const stalled = !vid.paused && !vid.ended && (Date.now() - lastProgress > 5000);
+        const stalled = !vid.paused && !vid.ended && (Date.now() - lastProgress > 15000);
         if (stalled) {
+            if (!navigator.onLine) return; // sem internet — evita cascata de pulos, só espera reconectar
             console.warn('[StreamTV] vídeo travado, pulando para o próximo');
             if (loopMode === 'playlist') navigate(1);
             else updateDisplay(); // 'single'/'off' — tenta recarregar a mesma mídia
             return;
         }
-        window._stallTimer = setTimeout(check, 1500);
+        window._stallTimer = setTimeout(check, 2000);
     };
     vid.addEventListener('timeupdate', () => { lastProgress = Date.now(); });
     vid.addEventListener('error', () => {
         console.warn('[StreamTV] erro no vídeo, pulando para o próximo');
-        if (loopMode === 'playlist') navigate(1);
+        const currentItem = queue[currentIndex];
+        showPlaybackError(currentItem ? currentItem.name : '', 'Vídeo não suportado ou corrompido neste dispositivo');
+        if (loopMode === 'playlist' && navigator.onLine) setTimeout(() => navigate(1), 2500);
     });
-    window._stallTimer = setTimeout(check, 1500);
+    window._stallTimer = setTimeout(check, 2000);
 }
 
 function _renderDisplayContent() {
@@ -537,7 +689,7 @@ function _renderDisplayContent() {
 
     document.getElementById('hudTitle').textContent = item.name;
     document.getElementById('hudPosition').innerHTML = `${currentIndex+1} de ${queue.length}${loopBadge}`;
-    document.getElementById('hudStatus').textContent = item.type==='image'?'🖼️ Imagem':item.type==='video'?'🎬 Vídeo':'📄 Documento';
+    document.getElementById('hudStatus').textContent = item.type==='image'?'🖼️ Imagem':item.type==='video'?'🎬 Vídeo':item.type==='hls'?'📡 Stream IPTV':'📄 Documento';
     document.getElementById('navCounter').textContent = `${currentIndex+1} / ${queue.length}`;
 
     if (item.type === 'image') {
@@ -558,7 +710,7 @@ function _renderDisplayContent() {
         // Sem o atributo autoplay de propósito: se o navegador bloquear a
         // reprodução automática (política de autoplay), o atributo falha em
         // silêncio — o vídeo fica parado na primeira imagem pra sempre, sem
-        // nenhum evento disparando, e só o watchdog de travamento (8s+) ia
+        // nenhum evento disparando, e só o watchdog de travamento ia
         // perceber. Chamando .play() manualmente abaixo, a Promise rejeitada
         // avisa NA HORA, e já pula pro próximo em vez de ficar preso.
         // preload="metadata" (não "auto"): em Fire TV/Smart TV com RAM curta, "auto"
@@ -578,23 +730,46 @@ function _renderDisplayContent() {
             armStallWatchdog(vid);
             const playPromise = vid.play();
             if (playPromise && typeof playPromise.catch === 'function') {
-                playPromise.catch(err => {
-                    if (err.name === 'NotAllowedError') {
-                        // Bloqueio de política de autoplay (não um vídeo com problema) —
-                        // acontece com QUALQUER vídeo até alguém tocar na tela uma vez.
-                        // Pular pro próximo cai no mesmo bloqueio e vira loop infinito
-                        // (foi o que travou/crashou antes) — em vez disso, espera o toque.
-                        // Desarma o watchdog: sem isso ele "descobre" o mesmo travamento
-                        // sozinho 5s depois e tenta pular, disputando com o toque.
-                        clearTimeout(window._stallTimer);
-                        console.warn('[StreamTV] autoplay bloqueado pelo navegador — aguardando toque na tela');
-                        showUnlockOverlay();
-                        return;
-                    }
-                    console.warn('[StreamTV] reprodução falhou, pulando:', err.message);
-                    if (loopMode === 'playlist') navigate(1);
-                });
+                playPromise.catch(err => handlePlayRejection(err, item));
             }
+        }
+    } else if (item.type === 'hls') {
+        // Stream IPTV (M3U8/HLS). Safari/tvOS tocam isso nativamente pela tag
+        // <video>; todo o resto (Fire TV Silk, Android TV, Tizen, WebOS, Chrome)
+        // não tem suporte nativo — precisa de hls.js remuxando via MSE.
+        const loopAttr = loopMode === 'single' ? 'loop' : '';
+        c.innerHTML = `<video id="mainVideo" preload="metadata" playsinline ${loopAttr} style="max-width:100%;max-height:100%;"></video>`;
+        const vid = document.getElementById('mainVideo');
+        if (!vid) return;
+
+        const startPlayback = () => {
+            if (loopMode !== 'single' && autoplay) {
+                vid.addEventListener('ended', () => { if (loopMode === 'playlist') navigate(1); });
+            }
+            armStallWatchdog(vid);
+            const playPromise = vid.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch(err => handlePlayRejection(err, item));
+            }
+        };
+
+        if (vid.canPlayType('application/vnd.apple.mpegurl')) {
+            vid.src = item.url;
+            startPlayback();
+        } else if (window.Hls && Hls.isSupported()) {
+            const hls = new Hls();
+            window._hlsInstance = hls;
+            hls.loadSource(item.url);
+            hls.attachMedia(vid);
+            hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
+            hls.on(Hls.Events.ERROR, (evt, data) => {
+                if (!data.fatal) return;
+                console.warn('[StreamTV] erro fatal no stream HLS:', data.type);
+                showPlaybackError(item.name, 'Stream IPTV indisponível');
+                if (loopMode === 'playlist' && navigator.onLine) setTimeout(() => navigate(1), 2500);
+            });
+        } else {
+            showPlaybackError(item.name, 'Stream IPTV (HLS) não suportado neste navegador');
         }
     } else {
         c.innerHTML = `<iframe src="${item.url}"></iframe>`;
@@ -607,10 +782,30 @@ document.addEventListener('keydown', e => {
     else if (e.key === 'ArrowLeft')         { e.preventDefault(); navigate(-1); }
     else if (e.key==='f'||e.key==='F')      { e.preventDefault(); toggleFullscreen(); }
 });
+
+// Fullscreen com fallback prefixado: vários navegadores de Smart TV (Tizen
+// mais antigo, WebOS, algumas versões do Silk do Fire Stick) só têm a API
+// prefixada (webkit/moz/ms) ou nenhuma — chamar a versão padrão direto lançava
+// erro antes até do .catch() conseguir pegar, travando o botão "Full"/tecla F.
+function _fsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement || null;
+}
+function _requestFS(el) {
+    const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+    if (!fn) return Promise.reject(new Error('Tela cheia não suportada neste navegador'));
+    const r = fn.call(el);
+    return r && r.catch ? r : Promise.resolve();
+}
+function _exitFS() {
+    const fn = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+    if (!fn) return Promise.reject(new Error('Tela cheia não suportada neste navegador'));
+    const r = fn.call(document);
+    return r && r.catch ? r : Promise.resolve();
+}
 function toggleFullscreen() {
     const el = document.getElementById('displayArea');
-    if (!document.fullscreenElement) el.requestFullscreen().catch(e=>alert(e.message));
-    else document.exitFullscreen();
+    const action = !_fsElement() ? _requestFS(el) : _exitFS();
+    action.catch(e => showStatus('⚠️ ' + e.message, 'warn'));
 }
 
 // ── AUTO-ESCONDER HUD/NAV EM FULLSCREEN ──
@@ -622,19 +817,43 @@ function _fsShowControls() {
     const area = document.getElementById('displayArea');
     area.classList.remove('fs-idle');
     clearTimeout(_fsIdleTimer);
-    if (document.fullscreenElement === area) {
+    if (_fsElement() === area) {
         _fsIdleTimer = setTimeout(() => area.classList.add('fs-idle'), 3000);
     }
 }
-document.addEventListener('fullscreenchange', () => {
+function _onFsChange() {
     const area = document.getElementById('displayArea');
-    if (document.fullscreenElement === area) _fsShowControls();
+    if (_fsElement() === area) _fsShowControls();
     else { area.classList.remove('fs-idle'); clearTimeout(_fsIdleTimer); }
-});
+}
+document.addEventListener('fullscreenchange', _onFsChange);
+document.addEventListener('webkitfullscreenchange', _onFsChange);
+document.addEventListener('mozfullscreenchange', _onFsChange);
+document.addEventListener('MSFullscreenChange', _onFsChange);
 document.getElementById('displayArea').addEventListener('mousemove', _fsShowControls);
+
+// ── STATUS DE REDE ──
+// Mostra um aviso visível quando a internet cai (comum em Fire Stick/TV box)
+// em vez de deixar a tela só piscando/preta sem explicação. Ao reconectar,
+// ressincroniza com o Supabase automaticamente.
+function _updateOnlineBanner() {
+    const b = document.getElementById('offlineBanner');
+    if (!b) return;
+    b.style.display = navigator.onLine ? 'none' : 'flex';
+}
+window.addEventListener('online', () => {
+    _updateOnlineBanner();
+    showStatus('✅ Conexão restabelecida', 'ok');
+    loadFromSupabase();
+});
+window.addEventListener('offline', () => {
+    _updateOnlineBanner();
+    showStatus('⚠️ Sem conexão com a internet', 'warn');
+});
 
 // ── INIT ──
 setLoopMode('playlist'); // default: loop playlist
+_updateOnlineBanner();
 loadFromSupabase();
 </script>
 </body>
