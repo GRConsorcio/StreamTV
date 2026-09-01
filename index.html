@@ -557,13 +557,32 @@ function navigate(dir) {
 function updateDisplay() {
     const c = document.getElementById('displayContent');
     const hadContent = c.childElementCount > 0;
-    if (!hadContent) { _renderDisplayContent(); return; }
+    if (!hadContent) { _safeRenderDisplayContent(); return; }
     disposeCurrentVideo();
     c.style.opacity = '0';
     setTimeout(() => {
-        _renderDisplayContent();
+        _safeRenderDisplayContent();
         c.style.opacity = '1';
     }, 400);
+}
+
+// BUGFIX: _renderDisplayContent() rodava direto dentro do setTimeout acima
+// sem nenhum try/catch — qualquer exceção não prevista (item malformado,
+// API do navegador faltando, etc) interrompia o callback ANTES da linha
+// "c.style.opacity = '1'", deixando o conteúdo com opacity:0 permanentemente
+// — tela preta travada pra sempre, sem nenhum erro visível pra quem tá na
+// frente da TV/tela (só no console). Isso também explica "trava tudo": em
+// loopMode 'playlist' o watchdog/timers seguem tentando trocar de mídia,
+// cada tentativa cai no mesmo erro, e a tela nunca volta a mostrar nada.
+function _safeRenderDisplayContent() {
+    try {
+        _renderDisplayContent();
+    } catch (e) {
+        console.error('[StreamTV] erro ao renderizar mídia:', e);
+        const item = queue[currentIndex];
+        showPlaybackError(item ? item.name : '', 'Erro ao carregar esta mídia');
+        if (loopMode === 'playlist' && navigator.onLine) setTimeout(() => navigate(1), 2500);
+    }
 }
 
 // Libera o <video>/hls.js anterior explicitamente (pausa + solta o buffer)
@@ -777,7 +796,15 @@ function _renderDisplayContent() {
 }
 
 // ── TECLADO + FULLSCREEN ──
+// BUGFIX: esse listener não checava se o foco estava num campo de texto nem
+// se havia Ctrl/Cmd/Alt pressionado — digitar "f" ou espaço em "Nome/Título"
+// (ex: "Filme", "Perfil") disparava tela cheia no meio da digitação, e
+// Ctrl+F (busca do navegador) também era sequestrado. Agora ignora
+// atalhos com modificador e qualquer tecla digitada dentro de input/textarea.
 document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const alvo = e.target;
+    if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA' || alvo.isContentEditable)) return;
     if (['ArrowRight',' '].includes(e.key)) { e.preventDefault(); navigate(1); }
     else if (e.key === 'ArrowLeft')         { e.preventDefault(); navigate(-1); }
     else if (e.key==='f'||e.key==='F')      { e.preventDefault(); toggleFullscreen(); }
