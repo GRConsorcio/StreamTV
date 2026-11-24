@@ -84,6 +84,34 @@
            pra não deixar a tela só piscando/preta sem explicação nenhuma. */
         .offline-banner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 20; background: rgba(239,68,68,0.94); color: #fff; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 700; display: none; align-items: center; gap: 6px; }
 
+        /* ── Placar ao Vivo do CRM na TV ── */
+        .rk-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: rgba(201,168,76,0.1); border: 1px solid rgba(201,168,76,0.3); border-radius: 6px; font-size: 12px; font-weight: 600; color: #f6d57a; cursor: pointer; }
+        .rk-toggle input { width: auto; accent-color: #c9a84c; cursor: pointer; }
+        .tv-ranking { width: 100%; height: 100%; padding: 56px 28px 64px; display: flex; flex-direction: column; gap: 16px; background: radial-gradient(circle at top right, #1e293b 0%, #090e1a 65%); color: #f8fafc; overflow: hidden; }
+        .tv-rk-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .tv-rk-title { display: flex; flex-direction: column; gap: 4px; }
+        .tv-rk-title h2 { font-size: clamp(22px, 2.5vw, 34px); font-weight: 800; color: #f6d57a; letter-spacing: -0.5px; }
+        .tv-rk-sub { font-size: 13px; color: #94a3b8; display: flex; align-items: center; gap: 8px; }
+        .tv-live-dot { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; display: inline-block; }
+        .tv-rk-kpis { display: flex; gap: 14px; flex-wrap: wrap; }
+        .tv-rk-kpi { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 10px 18px; min-width: 170px; }
+        .tv-rk-kpi small { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #94a3b8; font-weight: 700; }
+        .tv-rk-kpi strong { display: block; font-size: clamp(20px, 2.2vw, 28px); font-weight: 800; color: #fff; margin-top: 2px; }
+        .tv-rk-kpi.gold strong { color: #f6d57a; }
+        .tv-rk-kpi.green strong { color: #4ade80; }
+        .tv-rk-bar { height: 7px; border-radius: 999px; background: rgba(255,255,255,0.08); margin-top: 6px; overflow: hidden; }
+        .tv-rk-bar > div { height: 100%; background: linear-gradient(90deg, #c9a84c, #4ade80); border-radius: 999px; transition: width .5s ease; }
+        .tv-rk-table-wrap { flex: 1; overflow-y: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; background: rgba(15,23,42,0.7); }
+        .tv-rk-table { width: 100%; border-collapse: collapse; font-size: clamp(13px, 1.25vw, 17px); }
+        .tv-rk-table th { text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); }
+        .tv-rk-table td { padding: 9px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .tv-rk-table tr.top1 td { background: rgba(201,168,76,0.1); }
+        .tv-rk-table .num { text-align: center; font-variant-numeric: tabular-nums; }
+        .tv-rk-table .total-cell { text-align: right; font-weight: 800; font-size: clamp(15px, 1.4vw, 20px); color: #f6d57a; }
+        .tv-day-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; background: rgba(74,222,128,0.16); color: #4ade80; font-weight: 800; font-size: 12px; }
+        .tv-rk-flash { animation: rkFlash 1.4s ease; }
+        @keyframes rkFlash { 0% { background: rgba(74,222,128,0.28); } 100% { background: transparent; } }
+
     </style>
 </head>
 <body>
@@ -114,6 +142,15 @@
             <button class="btn-primary" id="uploadBtn" onclick="uploadMedia()">⬆️ Fazer Upload</button>
         </div>
 
+        <!-- PLACAR CRM AO VIVO -->
+        <div class="section">
+            <span class="section-title">Placar CRM (Tempo Real)</span>
+            <label class="rk-toggle">
+                <span>🏆 Exibir Placar ao Vivo</span>
+                <input type="checkbox" id="toggleRankingChk" checked onchange="toggleRankingSlide(this.checked)">
+            </label>
+        </div>
+
         <!-- STREAM / IPTV POR URL -->
         <div class="section">
             <span class="section-title">Adicionar Stream (URL / IPTV)</span>
@@ -131,6 +168,7 @@
                     <option value="hls">📡 Stream IPTV (HLS/M3U8)</option>
                     <option value="video">🎬 Vídeo direto (MP4/WebM)</option>
                     <option value="image">🖼️ Imagem</option>
+                    <option value="web">🌐 Página Web / Painel (Iframe)</option>
                 </select>
             </div>
             <button class="btn-secondary" onclick="addStreamUrl()">➕ Adicionar à Fila</button>
@@ -208,11 +246,32 @@ const sb = createClient(SUPA_URL, SUPA_KEY);
 const BUCKET = 'streamtv';
 
 const FOLDER = 'midia'; // pasta dentro do bucket
+const RANKING_FB_URL = 'https://homegr-71157-default-rtdb.firebaseio.com/equipe_danylo.json';
 let queue = [];
 let currentIndex = 0;
 let isUploading = false;
 let loopMode = 'playlist'; // 'playlist' | 'single' | 'off'
 let autoplay = true;
+let showRanking = localStorage.getItem('stv_show_ranking') !== '0';
+let rankingData = null;
+let rankingUpdatedAt = null;
+let rankingPrevTotal = null;
+let rankingFlashed = false;
+let _lastStorageSig = null;
+
+function rankingQueueItem() {
+    return { id: 'crm_ranking_live', name: '🏆 Placar de Vendas (Ao Vivo)', type: 'ranking', source: 'crm', stPath: null };
+}
+
+function toggleRankingSlide(enabled) {
+    showRanking = !!enabled;
+    try { localStorage.setItem('stv_show_ranking', showRanking ? '1' : '0'); } catch (e) {}
+    const without = queue.filter(it => it.type !== 'ranking');
+    queue = showRanking ? [rankingQueueItem(), ...without] : without;
+    if (currentIndex >= queue.length) currentIndex = 0;
+    renderQueue();
+    updateDisplay();
+}
 
 function setLoopMode(mode) {
     loopMode = mode;
@@ -380,14 +439,14 @@ function addStreamUrl() {
 // ainda estiver subindo no boot.
 let _syncRetryDelay = 10000;
 let _syncInFlight = false;
-async function loadFromSupabase(isRetry) {
+async function loadFromSupabase(isRetry, silentBackground) {
     // Evita duas sincronizações rodando ao mesmo tempo (clique duplo no "Sync",
     // ou o retry automático disparando junto com o evento 'online') — sem essa
     // trava, dois updateDisplay() concorrentes trocam o <video> no meio um do
     // outro e o play() de um deles é abortado no meio (AbortError em cascata).
     if (_syncInFlight) return;
     _syncInFlight = true;
-    if (!isRetry) showStatus('🔄 Carregando...', 'warn');
+    if (!isRetry && !silentBackground) showStatus('🔄 Carregando...', 'warn');
     try {
         const { data: files, error } = await sb.storage.from(BUCKET).list(FOLDER, {
             sortBy: { column: 'created_at', order: 'asc' }
@@ -401,23 +460,34 @@ async function loadFromSupabase(isRetry) {
             const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(stPath);
             return { id: stPath, name, type, url: pub.publicUrl, stPath, source: 'storage', fileName: f.name, fileSize: f.metadata?.size };
         });
+        const sig = storageItems.map(i => `${i.id}:${i.fileSize || 0}`).join('|');
+        // No sync em segundo plano, só reinicia o player se realmente houve mudança nos arquivos do Storage.
+        if (silentBackground && sig === _lastStorageSig && queue.length) {
+            clearTimeout(window._syncRetryTimer);
+            _syncRetryDelay = 10000;
+            return;
+        }
+        _lastStorageSig = sig;
         // Streams adicionados por URL não existem no Storage — o list() não os
         // vê, então precisam ser preservados manualmente ou o Sync os apaga.
-        const urlItems = queue.filter(it => it.source === 'url' || !it.stPath);
-        queue = [...storageItems, ...urlItems];
+        const urlItems = queue.filter(it => it.source === 'url' || (!it.stPath && it.type !== 'ranking'));
+        queue = showRanking ? [rankingQueueItem(), ...storageItems, ...urlItems] : [...storageItems, ...urlItems];
+        if (currentIndex >= queue.length) currentIndex = 0;
 
         saveLocal();
         renderQueue();
         updateDisplay();
-        showStatus(`✅ ${queue.length} item(ns) na fila`, 'ok');
+        if (!silentBackground) showStatus(`✅ ${queue.length} item(ns) na fila`, 'ok');
 
         clearTimeout(window._syncRetryTimer);
         _syncRetryDelay = 10000;
     } catch (err) {
-        showStatus('⚠️ Erro ao carregar — usando cache local', 'warn');
-        await loadLocal();
+        if (!silentBackground) {
+            showStatus('⚠️ Erro ao carregar — usando cache local', 'warn');
+            await loadLocal();
+        }
         clearTimeout(window._syncRetryTimer);
-        window._syncRetryTimer = setTimeout(() => loadFromSupabase(true), _syncRetryDelay);
+        window._syncRetryTimer = setTimeout(() => loadFromSupabase(true, silentBackground), _syncRetryDelay);
         _syncRetryDelay = Math.min(_syncRetryDelay * 2, 60000);
     } finally {
         _syncInFlight = false;
@@ -427,6 +497,13 @@ async function loadFromSupabase(isRetry) {
 // ── DELETAR DO SUPABASE STORAGE ──
 async function deleteMedia(index) {
     const item = queue[index];
+    if (!item) return;
+    if (item.type === 'ranking') {
+        const chk = document.getElementById('toggleRankingChk');
+        if (chk) chk.checked = false;
+        toggleRankingSlide(false);
+        return;
+    }
     if (!confirm(`Deletar "${item.name}"?`)) return;
     try {
         if (item.stPath) {
@@ -527,6 +604,17 @@ async function clearLocal() {
     renderQueue(); updateDisplay();
 }
 
+const _esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+function _typeLabel(type) {
+    if (type === 'ranking') return '🏆 Placar ao Vivo';
+    if (type === 'image')   return '🖼️ Imagem';
+    if (type === 'video')   return '🎬 Vídeo';
+    if (type === 'hls')     return '📡 Stream IPTV';
+    if (type === 'web')     return '🌐 Página Web';
+    return '📄 Documento';
+}
+
 // ── RENDER ──
 function renderQueue() {
     const list = document.getElementById('queueList');
@@ -536,8 +624,8 @@ function renderQueue() {
     list.innerHTML = queue.map((item, i) => `
         <div class="queue-item ${i===currentIndex?'active':''}" onclick="selectMedia(${i})">
             <div class="queue-item-info">
-                <div class="queue-item-name">${i+1}. ${item.name}</div>
-                <div class="queue-item-type">${item.type==='image'?'🖼️ Imagem':item.type==='video'?'🎬 Vídeo':item.type==='hls'?'📡 Stream IPTV':'📄 Documento'}${item.fileSize?' • '+(item.fileSize/1024).toFixed(0)+' KB':''}</div>
+                <div class="queue-item-name">${i+1}. ${_esc(item.name)}</div>
+                <div class="queue-item-type">${_typeLabel(item.type)}${item.fileSize?' • '+(item.fileSize/1024).toFixed(0)+' KB':''}</div>
             </div>
             <button class="btn-danger" onclick="event.stopPropagation();deleteMedia(${i})">🗑️</button>
         </div>
@@ -592,6 +680,7 @@ function _safeRenderDisplayContent() {
 // exibição mais pesada e propensa a travar com o tempo.
 function disposeCurrentVideo() {
     clearTimeout(window._stallTimer);
+    clearTimeout(window._imgTimer);
     if (window._hlsInstance) {
         try { window._hlsInstance.destroy(); } catch(e) {}
         window._hlsInstance = null;
@@ -708,10 +797,16 @@ function _renderDisplayContent() {
 
     document.getElementById('hudTitle').textContent = item.name;
     document.getElementById('hudPosition').innerHTML = `${currentIndex+1} de ${queue.length}${loopBadge}`;
-    document.getElementById('hudStatus').textContent = item.type==='image'?'🖼️ Imagem':item.type==='video'?'🎬 Vídeo':item.type==='hls'?'📡 Stream IPTV':'📄 Documento';
+    document.getElementById('hudStatus').textContent = _typeLabel(item.type);
     document.getElementById('navCounter').textContent = `${currentIndex+1} / ${queue.length}`;
 
-    if (item.type === 'image') {
+    if (item.type === 'ranking') {
+        c.innerHTML = _renderRankingMarkup();
+        if (autoplay && loopMode === 'playlist' && queue.length > 1) {
+            clearTimeout(window._imgTimer);
+            window._imgTimer = setTimeout(() => navigate(1), 20000);
+        }
+    } else if (item.type === 'image') {
         c.innerHTML = `<img src="${item.url}" alt="${item.name}">`;
         // Auto-advance images after 10s if autoplay is on
         if (autoplay && (loopMode === 'playlist' || loopMode === 'single')) {
@@ -791,8 +886,143 @@ function _renderDisplayContent() {
             showPlaybackError(item.name, 'Stream IPTV (HLS) não suportado neste navegador');
         }
     } else {
-        c.innerHTML = `<iframe src="${item.url}"></iframe>`;
+        c.innerHTML = `<iframe src="${_esc(item.url)}"></iframe>`;
+        if (item.type === 'web' && autoplay && loopMode === 'playlist' && queue.length > 1) {
+            clearTimeout(window._imgTimer);
+            window._imgTimer = setTimeout(() => navigate(1), 20000);
+        }
     }
+}
+
+// ── PLACAR AO VIVO DO CRM (FIREBASE RTDB) ──
+function _hojeBRT() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+function _horaBRT(d) {
+    return (d || new Date()).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function _renderRankingMarkup() {
+    if (!rankingData || !rankingData.dados) {
+        return '<div class="tv-ranking"><div class="tv-rk-head"><div class="tv-rk-title"><h2>🏆 Placar ao Vivo · CRM</h2><div class="tv-rk-sub"><span class="tv-live-dot"></span>Conectando ao placar em tempo real...</div></div></div></div>';
+    }
+    const cfg = rankingData.config || {};
+    const dados = rankingData.dados || {};
+    const snapDia = rankingData.snapDia || {};
+    const cotasDia = rankingData.cotasDia || {};
+    const semanas = Math.max(4, Number(cfg.semanas) || 5);
+    const meta = Number(cfg.meta) || 0;
+    const metaDia = Number(cfg.vendas_dia) || 0;
+    const hoje = _hojeBRT();
+
+    const rows = Object.entries(dados).map(([key, val]) => {
+        const s = Array.isArray(val.s) ? val.s : [];
+        const total = s.reduce((a, b) => a + (Number(b) || 0), 0);
+        const snap = snapDia[key];
+        const diaSnap = snap && snap.data === hoje ? Math.max(0, total - (Number(snap.base) || 0)) : 0;
+        const cDia = cotasDia[key];
+        const diaExtra = cDia && cDia.data === hoje ? (Number(cDia.extra) || 0) : 0;
+        const vendasHoje = diaSnap + diaExtra;
+        const taxa = val.conversao && val.conversao.taxa != null ? `${val.conversao.taxa}%` : '—';
+        return { key, nome: val.nome || key, s, total, vendasHoje, taxa };
+    }).sort((a, b) => b.total - a.total || b.vendasHoje - a.vendasHoje || a.nome.localeCompare(b.nome, 'pt-BR'));
+
+    const totalMes = rows.reduce((a, r) => a + r.total, 0);
+    const totalHoje = rows.reduce((a, r) => a + r.vendasHoje, 0);
+    const pctMeta = meta > 0 ? Math.min(100, Math.round((totalMes / meta) * 100)) : 0;
+    const medals = ['🥇', '🥈', '🥉'];
+    const flashCls = rankingFlashed ? ' tv-rk-flash' : '';
+    rankingFlashed = false;
+
+    const weekHeaders = Array.from({ length: semanas }, (_, i) => `<th class="num">S${i + 1}</th>`).join('');
+    const bodyRows = rows.map((r, idx) => {
+        const pos = idx < 3 ? medals[idx] : `${idx + 1}º`;
+        const weekCells = Array.from({ length: semanas }, (_, i) => `<td class="num">${Number(r.s[i]) || 0}</td>`).join('');
+        const hojeBadge = r.vendasHoje > 0 ? `<span class="tv-day-pill">+${r.vendasHoje}</span>` : '<span style="color:#475569">0</span>';
+        return `<tr class="${idx === 0 && r.total > 0 ? 'top1' : ''}${flashCls}">
+            <td><strong>${pos}</strong></td>
+            <td><strong>${_esc(r.nome)}</strong></td>
+            <td class="num">${hojeBadge}</td>
+            ${weekCells}
+            <td class="num" style="color:#94a3b8">${_esc(r.taxa)}</td>
+            <td class="total-cell">${r.total}</td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="tv-ranking">
+        <div class="tv-rk-head">
+            <div class="tv-rk-title">
+                <h2>🏆 ${_esc(cfg.equipe || 'Placar de Vendas')}</h2>
+                <div class="tv-rk-sub">
+                    <span class="tv-live-dot"></span>
+                    <span>Sincronização automática em tempo real · atualizado às ${_horaBRT(rankingUpdatedAt)}</span>
+                </div>
+            </div>
+            <div class="tv-rk-kpis">
+                <div class="tv-rk-kpi gold">
+                    <small>Cotas no mês${meta ? ` (Meta ${meta})` : ''}</small>
+                    <strong>${totalMes}${meta ? ` / ${meta} (${pctMeta}%)` : ''}</strong>
+                    ${meta ? `<div class="tv-rk-bar"><div style="width:${pctMeta}%"></div></div>` : ''}
+                </div>
+                <div class="tv-rk-kpi green">
+                    <small>Vendas hoje${metaDia ? ` (Meta ${metaDia})` : ''}</small>
+                    <strong>${totalHoje}${metaDia ? ` / ${metaDia}` : ''}</strong>
+                </div>
+            </div>
+        </div>
+        <div class="tv-rk-table-wrap">
+            <table class="tv-rk-table">
+                <thead><tr><th>#</th><th>Vendedor</th><th class="num">Hoje</th>${weekHeaders}<th class="num">Conv.</th><th style="text-align:right">Total</th></tr></thead>
+                <tbody>${bodyRows}</tbody>
+            </table>
+        </div>
+    </div>`;
+}
+
+function _applyRankingPayload(data) {
+    if (!data || typeof data !== 'object') return;
+    const total = Object.values(data.dados || {}).reduce((sum, v) => sum + (Array.isArray(v.s) ? v.s.reduce((a, b) => a + (Number(b) || 0), 0) : 0), 0);
+    if (rankingPrevTotal !== null && total !== rankingPrevTotal) rankingFlashed = true;
+    rankingPrevTotal = total;
+    rankingData = data;
+    rankingUpdatedAt = new Date();
+    const cur = queue[currentIndex];
+    if (cur && cur.type === 'ranking') {
+        const c = document.getElementById('displayContent');
+        if (c) c.innerHTML = _renderRankingMarkup();
+    }
+}
+
+async function _fetchRanking() {
+    try {
+        const res = await fetch(RANKING_FB_URL, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        _applyRankingPayload(data);
+    } catch (e) {
+        console.warn('[StreamTV] erro ao atualizar placar CRM:', e.message);
+    }
+}
+
+function _startRankingSync() {
+    _fetchRanking();
+    // Tempo real via Firebase RTDB REST SSE + fallback por polling a cada 15s
+    if (typeof EventSource !== 'undefined') {
+        try {
+            const es = new EventSource(RANKING_FB_URL);
+            const onEvent = (ev) => {
+                try {
+                    const msg = JSON.parse(ev.data);
+                    if (msg && msg.path === '/' && msg.data) _applyRankingPayload(msg.data);
+                    else _fetchRanking();
+                } catch (e) { _fetchRanking(); }
+            };
+            es.addEventListener('put', onEvent);
+            es.addEventListener('patch', onEvent);
+            es.onerror = () => { /* fallback polling abaixo garante continuidade */ };
+        } catch (e) {}
+    }
+    setInterval(_fetchRanking, 15000);
 }
 
 // ── TECLADO + FULLSCREEN ──
@@ -879,9 +1109,14 @@ window.addEventListener('offline', () => {
 });
 
 // ── INIT ──
+const _rkChk = document.getElementById('toggleRankingChk');
+if (_rkChk) _rkChk.checked = showRanking;
 setLoopMode('playlist'); // default: loop playlist
 _updateOnlineBanner();
+_startRankingSync();
 loadFromSupabase();
+// Ressincroniza mídias do Storage em segundo plano a cada 60s (só recarrega se houver mudança)
+setInterval(() => loadFromSupabase(true, true), 60000);
 </script>
 </body>
 </html>
