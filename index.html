@@ -927,7 +927,7 @@ function _renderRankingMarkup() {
         return { key, nome: val.nome || key, s, total, vendasHoje, taxa };
     }).sort((a, b) => b.total - a.total || b.vendasHoje - a.vendasHoje || a.nome.localeCompare(b.nome, 'pt-BR'));
 
-    const totalMes = rows.reduce((a, r) => a + r.total, 0);
+    const totalMes = rows.reduce((a, r) => a + r.total, 0) + (Number(cfg.cotasFantasma) || 0);
     const totalHoje = rows.reduce((a, r) => a + r.vendasHoje, 0);
     const pctMeta = meta > 0 ? Math.min(100, Math.round((totalMes / meta) * 100)) : 0;
     const medals = ['🥇', '🥈', '🥉'];
